@@ -630,6 +630,7 @@ export function useCanvas() {
     culledStats,
     cursorStyle,
     editingStickyId: readonly(editingStickyId),
+    closeStickyEdit: () => { editingStickyId.value = null },
     onPointerDown,
     onPointerMove,
     onPointerUp,

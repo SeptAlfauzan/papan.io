@@ -5,9 +5,14 @@
  * Assembles useCanvas (drawing / camera / pointer events)
  * and useBoardSocket (WebSocket sync + offline queue).
  */
+import { computed } from 'vue'
 import { useCanvas } from '@/composables/useCanvas'
 import { useBoardSocket } from '@/composables/useBoardSocket'
+import { useBoardStore } from '@/stores/board.store'
 import CanvasToolbar from '@/components/CanvasToolbar.vue'
+import StickyNoteModal from '@/components/StickyNoteModal.vue'
+import { sendStickyUpdate } from '@/services/sync.service'
+import type { StickyNote } from '@/types/board.types'
 
 const {
   canvasEl,
@@ -29,9 +34,31 @@ const {
   zoomInBtn,
   zoomOutBtn,
   resetView,
+  editingStickyId,
+  closeStickyEdit,
 } = useCanvas()
 
 const { statusLabel } = useBoardSocket()
+
+const store = useBoardStore()
+
+const editingNote = computed(() => {
+  if (!editingStickyId.value) return null
+  return store.stickyNotes.find(n => n.id === editingStickyId.value) ?? null
+})
+
+function onStickySave(payload: { text: string; truncate: boolean }): void {
+  if (!editingStickyId.value) return
+  const note = store.stickyNotes.find(n => n.id === editingStickyId.value)
+  if (!note) return
+  store.updateStickyNote(editingStickyId.value, payload)
+  sendStickyUpdate(editingStickyId.value, payload)
+  closeStickyEdit()
+}
+
+function onStickyClose(): void {
+  closeStickyEdit()
+}
 </script>
 
 <template>
@@ -65,6 +92,14 @@ const { statusLabel } = useBoardSocket()
     <div class="status-badge" :class="statusLabel === 'connected' ? 'online' : 'offline'">
       {{ statusLabel }}
     </div>
+
+    <!-- Sticky note editing modal -->
+    <StickyNoteModal
+      v-if="editingNote"
+      :note="editingNote"
+      @save="onStickySave"
+      @close="onStickyClose"
+    />
 
     <!-- Toolbar -->
     <CanvasToolbar
