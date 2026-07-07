@@ -4,7 +4,7 @@
  * No Vue dependencies. Accepts all state as parameters and returns
  * culling stats. Designed to be called from the rAF loop in useCanvas.
  */
-import type { Stroke, CameraState, ToolMode } from '@/types/board.types'
+import type { Stroke, CameraState, ToolMode, StickyNote } from '@/types/board.types'
 
 // ── Constants ───────────────────────────────────────────────────────
 export const GRID_SPACING = 40        // world units between grid dots
@@ -126,6 +126,70 @@ function drawStroke(ctx: CanvasRenderingContext2D, stroke: Stroke, color?: strin
   const last = pts[pts.length - 1]!
   ctx.lineTo(last[0], last[1])
   ctx.stroke()
+}
+
+function drawStickyNote(
+  ctx: CanvasRenderingContext2D,
+  note: StickyNote,
+): void {
+  const { x, y, width, height, color, text, truncate } = note
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.08)'
+  ctx.beginPath()
+  ctx.roundRect(x + 3, y + 3, width, height, 4)
+  ctx.fill()
+
+  // Fill
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.roundRect(x, y, width, height, 4)
+  ctx.fill()
+
+  // Border
+  ctx.strokeStyle = 'rgba(0,0,0,0.12)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.roundRect(x, y, width, height, 4)
+  ctx.stroke()
+
+  // Text
+  if (text) {
+    ctx.fillStyle = '#1c1c1e'
+    ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif'
+    ctx.textBaseline = 'top'
+    ctx.textAlign = 'left'
+
+    const padding = 12
+    const maxWidth = width - padding * 2
+    const lineHeight = 20
+    let displayText = text
+
+    if (truncate && text.length > 100) {
+      displayText = text.slice(0, 100) + '...'
+    }
+
+    // Simple word wrap
+    const words = displayText.split('')
+    let line = ''
+    let lineY = y + padding
+
+    for (const char of text) {
+      const testLine = line + char
+      const metrics = ctx.measureText(testLine)
+      if (metrics.width > maxWidth && line.length > 0) {
+        ctx.fillText(line, x + padding, lineY)
+        line = char
+        lineY += lineHeight
+        if (lineY > y + height - padding) break
+      } else {
+        line = testLine
+      }
+    }
+    if (line && lineY <= y + height - padding) {
+      ctx.fillText(line, x + padding, lineY)
+    }
+  }
 }
 
 /** Draw the on-canvas cursor preview ring (pencil size / eraser circle) */
@@ -293,6 +357,33 @@ export function strokeHit(
   return false
 }
 
+export interface BoundingRect {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+export function stickyNoteHit(
+  sticky: StickyNote,
+  trailUnion: BoundingRect,
+): boolean {
+  const sMinX = sticky.x
+  const sMinY = sticky.y
+  const sMaxX = sticky.x + sticky.width
+  const sMaxY = sticky.y + sticky.height
+
+  if (sMaxX < trailUnion.minX || sMinX > trailUnion.maxX) return false
+  if (sMaxY < trailUnion.minY || sMinY > trailUnion.maxY) return false
+
+  const trailCoversLeft = trailUnion.minX <= sMinX
+  const trailCoversRight = trailUnion.maxX >= sMaxX
+  const trailCoversTop = trailUnion.minY <= sMinY
+  const trailCoversBottom = trailUnion.maxY >= sMaxY
+
+  return trailCoversLeft && trailCoversRight && trailCoversTop && trailCoversBottom
+}
+
 export interface RenderResult {
   rendered: number
   total: number
@@ -315,6 +406,7 @@ export function renderFrame(
   dpr: number,
   camera: CameraState,
   strokes: readonly Stroke[],
+  stickyNotes: readonly StickyNote[],
   hoverPos: { x: number; y: number } | null,
   tool: ToolMode,
   color: string,
@@ -342,6 +434,14 @@ export function renderFrame(
     if (boundsIntersect(s, vp)) {
       drawStroke(ctx, s)
       rendered++
+    }
+  }
+
+  // Sticky notes
+  for (let i = 0; i < stickyNotes.length; i++) {
+    const n = stickyNotes[i]!
+    if (boundsIntersect({ minX: n.x, maxX: n.x + n.width, minY: n.y, maxY: n.y + n.height } as Stroke, vp)) {
+      drawStickyNote(ctx, n)
     }
   }
 

@@ -5,9 +5,10 @@ import {
   boundsIntersect,
   strokeHit,
   strokeErasedPoints,
+  stickyNoteHit,
   ERASE_RADIUS_SCREEN,
 } from '@/services/canvas-engine'
-import type { Stroke, CameraState, Point } from '@/types/board.types'
+import type { Stroke, CameraState, Point, StickyNote } from '@/types/board.types'
 
 const camera: CameraState = { x: 200, y: 150, zoom: 2 }
 const canvasW = 800
@@ -232,5 +233,47 @@ describe('strokeErasedPoints', () => {
     }
     const result = strokeErasedPoints(s, { x: 10, y: 5 }, radius)
     expect(result.size).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('stickyNoteHit', () => {
+  function makeSticky(overrides: Partial<StickyNote> = {}): StickyNote {
+    return {
+      id: 's1', x: 100, y: 100, width: 200, height: 150,
+      text: 'hello', truncate: false, color: '#fff9c4',
+      ...overrides,
+    }
+  }
+
+  it('returns true when trail union fully contains sticky rect', () => {
+    const s = makeSticky()
+    // trail union rect covers [50,50] to [350,300] which contains sticky [100,100] to [300,250]
+    const trailUnion = { minX: 50, minY: 50, maxX: 350, maxY: 300 }
+    expect(stickyNoteHit(s, trailUnion)).toBe(true)
+  })
+
+  it('returns false when trail union partially overlaps', () => {
+    const s = makeSticky()
+    const trailUnion = { minX: 50, minY: 50, maxX: 150, maxY: 150 }
+    // trail only covers top-left quarter of sticky
+    expect(stickyNoteHit(s, trailUnion)).toBe(false)
+  })
+
+  it('returns false when trail union does not overlap at all', () => {
+    const s = makeSticky()
+    const trailUnion = { minX: 500, minY: 500, maxX: 600, maxY: 600 }
+    expect(stickyNoteHit(s, trailUnion)).toBe(false)
+  })
+
+  it('returns true when trail union exactly matches sticky rect', () => {
+    const s = makeSticky()
+    const trailUnion = { minX: 100, minY: 100, maxX: 300, maxY: 250 }
+    expect(stickyNoteHit(s, trailUnion)).toBe(true)
+  })
+
+  it('returns true when trail union exceeds sticky rect on all sides', () => {
+    const s = makeSticky()
+    const trailUnion = { minX: 0, minY: 0, maxX: 400, maxY: 350 }
+    expect(stickyNoteHit(s, trailUnion)).toBe(true)
   })
 })
