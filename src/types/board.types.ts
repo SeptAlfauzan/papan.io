@@ -14,6 +14,18 @@ export interface Stroke {
   maxY: number
 }
 
+/** A sticky note on the canvas */
+export interface StickyNote {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  truncate: boolean
+  color: string
+}
+
 /** Camera state: world-space coordinate at screen center */
 export interface CameraState {
   x: number
@@ -32,4 +44,4 @@ export interface HistoryEntry {
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
 /** Tool modes available in the toolbar */
-export type ToolMode = 'pencil' | 'hand' | 'eraser'
+export type ToolMode = 'pencil' | 'hand' | 'eraser' | 'sticky-note'

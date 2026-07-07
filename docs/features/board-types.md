@@ -32,6 +32,27 @@ A single drawing stroke on the infinite canvas.
 - `width`: Stroke width in world-space units
 - `minX/maxX/minY/maxY`: Axis-aligned bounding box for viewport culling optimization
 
+### StickyNote
+```ts
+interface StickyNote {
+  id: string
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  truncate: boolean
+  color: string
+}
+```
+A sticky note on the canvas.
+- `id`: Unique identifier
+- `x, y`: Top-left position in world coordinates
+- `width, height`: Dimensions in world-space units
+- `text`: Note content
+- `truncate`: Whether to truncate overflow text
+- `color`: Background hex color
+
 ### CameraState
 ```ts
 interface CameraState {
@@ -62,13 +83,13 @@ type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
 ### ToolMode
 ```ts
-type ToolMode = 'pencil' | 'hand' | 'eraser'
+type ToolMode = 'pencil' | 'hand' | 'eraser' | 'sticky-note'
 ```
 
 ## Usage
 
 ```ts
-import type { Stroke, Point, CameraState, HistoryEntry, ConnectionStatus, ToolMode } from '@/types/board.types'
+import type { Stroke, Point, StickyNote, CameraState, HistoryEntry, ConnectionStatus, ToolMode } from '@/types/board.types'
 ```
 
 ## Design Decisions
