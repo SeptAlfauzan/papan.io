@@ -178,6 +178,13 @@ function handleSyncState(raw: unknown): void {
       if (!item || typeof item !== 'object') continue
       const n = item as Record<string, unknown>
       if (typeof n.id !== 'string') continue
+      if (typeof n.x !== 'number') continue
+      if (typeof n.y !== 'number') continue
+      if (typeof n.width !== 'number') continue
+      if (typeof n.height !== 'number') continue
+      if (typeof n.text !== 'string') continue
+      if (typeof n.truncate !== 'boolean') continue
+      if (typeof n.color !== 'string') continue
       parsed.push(n as unknown as StickyNote)
     }
     store.replaceAllStickyNotes(parsed)

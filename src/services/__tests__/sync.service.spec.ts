@@ -290,6 +290,43 @@ describe('sync service', () => {
       expect(store.strokes).toHaveLength(1)
       expect(store.strokes[0]!.id).toBe('good')
     })
+
+    it('parses stickyNotes from sync state', async () => {
+      await setupConnected()
+      store.addStickyNote(fakeSticky('old'))
+
+      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      expect(syncEntry).toBeDefined()
+      syncEntry![1]({
+        strokes: [],
+        stickyNotes: [
+          { id: 's1', x: 100, y: 200, width: 150, height: 150, text: 'hello', truncate: false, color: '#fff9c4' },
+        ],
+      })
+
+      expect(store.stickyNotes).toHaveLength(1)
+      expect(store.stickyNotes[0]!.id).toBe('s1')
+      expect(store.stickyNotes[0]!.text).toBe('hello')
+    })
+
+    it('filters invalid stickyNotes entries', async () => {
+      await setupConnected()
+
+      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      expect(syncEntry).toBeDefined()
+      syncEntry![1]({
+        strokes: [],
+        stickyNotes: [
+          { id: 'good', x: 0, y: 0, width: 150, height: 150, text: 'ok', truncate: false, color: '#fff9c4' },
+          null,
+          { id: 'no-x' },
+          42,
+        ],
+      })
+
+      expect(store.stickyNotes).toHaveLength(1)
+      expect(store.stickyNotes[0]!.id).toBe('good')
+    })
   })
 
   describe('sendStrokeAdd / sendStrokeErase', () => {
@@ -381,6 +418,27 @@ describe('sync service', () => {
       const strokeEraseCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'stroke:erase')
       expect(strokeAddCalls).toHaveLength(2)
       expect(strokeEraseCalls).toHaveLength(1)
+    })
+
+    it('flushes queued sticky operations on reconnect', async () => {
+      const sync = await setupConnected()
+      mockSocket.connected = false
+
+      sync.sendStickyAdd({ id: 'q1', x: 0, y: 0, width: 150, height: 150, text: '', truncate: false, color: '#fff9c4' })
+      sync.sendStickyErase('q2')
+      sync.sendStickyUpdate('q3', { text: 'hi', truncate: true })
+
+      mockSocket.connected = true
+      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      expect(connectEntry).toBeDefined()
+      connectEntry![1]()
+
+      const stickyAddCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'sticky:add')
+      const stickyEraseCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'sticky:erase')
+      const stickyUpdateCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'sticky:update')
+      expect(stickyAddCalls).toHaveLength(1)
+      expect(stickyEraseCalls).toHaveLength(1)
+      expect(stickyUpdateCalls).toHaveLength(1)
     })
   })
 
