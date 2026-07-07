@@ -6,7 +6,7 @@ import type { Stroke, StickyNote } from '@/types/board.types'
 const mockSocket = vi.hoisted(() => ({
   connected: false,
   emit: vi.fn<(...args: unknown[]) => void>(),
-  on: vi.fn<(...args: unknown[]) => void>(),
+  on: vi.fn<(event: string, handler: (...args: unknown[]) => void) => void>(),
   removeAllListeners: vi.fn<() => void>(),
   disconnect: vi.fn<() => void>(),
 }))
@@ -92,7 +92,7 @@ describe('sync service', () => {
       mockSocket.connected = true
 
       // find the connect handler and call it to simulate connection
-      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      const connectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'connect')
       expect(connectEntry).toBeDefined()
       connectEntry![1]()
 
@@ -108,7 +108,7 @@ describe('sync service', () => {
       await setupConnected()
       mockSocket.connected = true
 
-      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      const connectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'connect')
       expect(connectEntry).toBeDefined()
       connectEntry![1]()
 
@@ -121,7 +121,7 @@ describe('sync service', () => {
     it('sets disconnected status', async () => {
       await setupConnected()
 
-      const disconnectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'disconnect')
+      const disconnectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'disconnect')
       expect(disconnectEntry).toBeDefined()
       disconnectEntry![1]()
     })
@@ -132,7 +132,7 @@ describe('sync service', () => {
       sync.connectSyncService('room')
       sync.status.value = 'error'
 
-      const disconnectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'disconnect')
+      const disconnectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'disconnect')
       expect(disconnectEntry).toBeDefined()
       disconnectEntry![1]()
 
@@ -144,7 +144,7 @@ describe('sync service', () => {
     it('calls addStroke for stroke:add event', async () => {
       await setupConnected()
 
-      const addEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'stroke:add')
+      const addEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'stroke:add')
       expect(addEntry).toBeDefined()
       addEntry![1](incomingStroke('incoming-1'))
 
@@ -156,7 +156,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStroke(fakeStroke('a'))
 
-      const eraseEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'stroke:erase')
+      const eraseEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'stroke:erase')
       expect(eraseEntry).toBeDefined()
       eraseEntry![1]({ strokeIds: ['a'] })
 
@@ -166,7 +166,7 @@ describe('sync service', () => {
     it('handles legacy board event with data field', async () => {
       await setupConnected()
 
-      const boardEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'board')
+      const boardEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'board')
       expect(boardEntry).toBeDefined()
       boardEntry![1]({ data: { event: 'stroke:add', ...incomingStroke('legacy') } })
 
@@ -177,7 +177,7 @@ describe('sync service', () => {
     it('handles stringified JSON in data field', async () => {
       await setupConnected()
 
-      const msgEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'message')
+      const msgEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'message')
       expect(msgEntry).toBeDefined()
       msgEntry![1]({ data: JSON.stringify({ event: 'stroke:add', ...incomingStroke('str-json') }) })
 
@@ -188,7 +188,7 @@ describe('sync service', () => {
     it('ignores invalid payload gracefully', async () => {
       await setupConnected()
 
-      const addEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'stroke:add')
+      const addEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'stroke:add')
       expect(addEntry).toBeDefined()
       const handler = addEntry![1] as (...args: unknown[]) => void
 
@@ -204,7 +204,7 @@ describe('sync service', () => {
       const sync = await loadSync()
       sync.connectSyncService('room')
 
-      const addEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'stroke:add')
+      const addEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'stroke:add')
       expect(addEntry).toBeDefined()
       addEntry![1](incomingStroke('orphan'))
 
@@ -214,7 +214,7 @@ describe('sync service', () => {
     it('calls addStickyNote for sticky:add event', async () => {
       await setupConnected()
 
-      const addEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sticky:add')
+      const addEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sticky:add')
       expect(addEntry).toBeDefined()
       addEntry![1](fakeSticky('sticky-1', { text: 'hello' }))
 
@@ -226,7 +226,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStickyNote(fakeSticky('a'))
 
-      const eraseEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sticky:erase')
+      const eraseEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sticky:erase')
       expect(eraseEntry).toBeDefined()
       eraseEntry![1]({ stickyId: 'a' })
 
@@ -237,7 +237,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStickyNote(fakeSticky('a', { text: 'old', truncate: false }))
 
-      const updateEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sticky:update')
+      const updateEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sticky:update')
       expect(updateEntry).toBeDefined()
       updateEntry![1]({ stickyId: 'a', text: 'new', truncate: true })
 
@@ -251,7 +251,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStroke(fakeStroke('old'))
 
-      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      const syncEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sync:state')
       expect(syncEntry).toBeDefined()
       syncEntry![1]({ strokes: [fakeStroke('new1'), fakeStroke('new2')] })
 
@@ -265,7 +265,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStroke(fakeStroke('a'))
 
-      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      const syncEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sync:state')
       expect(syncEntry).toBeDefined()
       syncEntry![1]({ strokes: 'not-an-array' })
 
@@ -276,7 +276,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStroke(fakeStroke('old'))
 
-      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      const syncEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sync:state')
       expect(syncEntry).toBeDefined()
       syncEntry![1]({
         strokes: [
@@ -295,7 +295,7 @@ describe('sync service', () => {
       await setupConnected()
       store.addStickyNote(fakeSticky('old'))
 
-      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      const syncEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sync:state')
       expect(syncEntry).toBeDefined()
       syncEntry![1]({
         strokes: [],
@@ -312,7 +312,7 @@ describe('sync service', () => {
     it('filters invalid stickyNotes entries', async () => {
       await setupConnected()
 
-      const syncEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sync:state')
+      const syncEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'sync:state')
       expect(syncEntry).toBeDefined()
       syncEntry![1]({
         strokes: [],
@@ -342,7 +342,7 @@ describe('sync service', () => {
       await setupConnected()
       mockSocket.connected = true
 
-      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      const connectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'connect')
       expect(connectEntry).toBeDefined()
       connectEntry![1]()
       mockSocket.emit.mockClear()
@@ -376,7 +376,7 @@ describe('sync service', () => {
     it('emits sticky:add when online', async () => {
       await setupConnected()
       mockSocket.connected = true
-      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      const connectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'connect')
       expect(connectEntry).toBeDefined()
       connectEntry![1]()
       mockSocket.emit.mockClear()
@@ -410,12 +410,12 @@ describe('sync service', () => {
       sync.sendStrokeErase(['q3'])
 
       mockSocket.connected = true
-      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      const connectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'connect')
       expect(connectEntry).toBeDefined()
       connectEntry![1]()
 
-      const strokeAddCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'stroke:add')
-      const strokeEraseCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'stroke:erase')
+      const strokeAddCalls = mockSocket.emit.mock.calls.filter((c: unknown[]) => c[0] === 'stroke:add')
+      const strokeEraseCalls = mockSocket.emit.mock.calls.filter((c: unknown[]) => c[0] === 'stroke:erase')
       expect(strokeAddCalls).toHaveLength(2)
       expect(strokeEraseCalls).toHaveLength(1)
     })
@@ -429,13 +429,13 @@ describe('sync service', () => {
       sync.sendStickyUpdate('q3', { text: 'hi', truncate: true })
 
       mockSocket.connected = true
-      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      const connectEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'connect')
       expect(connectEntry).toBeDefined()
       connectEntry![1]()
 
-      const stickyAddCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'sticky:add')
-      const stickyEraseCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'sticky:erase')
-      const stickyUpdateCalls = mockSocket.emit.mock.calls.filter((c: [string]) => c[0] === 'sticky:update')
+      const stickyAddCalls = mockSocket.emit.mock.calls.filter((c: unknown[]) => c[0] === 'sticky:add')
+      const stickyEraseCalls = mockSocket.emit.mock.calls.filter((c: unknown[]) => c[0] === 'sticky:erase')
+      const stickyUpdateCalls = mockSocket.emit.mock.calls.filter((c: unknown[]) => c[0] === 'sticky:update')
       expect(stickyAddCalls).toHaveLength(1)
       expect(stickyEraseCalls).toHaveLength(1)
       expect(stickyUpdateCalls).toHaveLength(1)
@@ -458,7 +458,7 @@ describe('sync service', () => {
       const sync = await setupConnected()
       sync.clearStoreRef()
 
-      const addEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'stroke:add')
+      const addEntry = mockSocket.on.mock.calls.find((c: unknown[]) => c[0] === 'stroke:add')
       expect(addEntry).toBeDefined()
       addEntry![1](incomingStroke('orphan'))
 

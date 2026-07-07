@@ -105,7 +105,7 @@ describe('strokeHit', () => {
   const radius = ERASE_RADIUS_SCREEN / 2 // arbitrary screen-space radius
 
   it('hits a single-point stroke at exact position', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[50, 50]],
       minX: 50, maxX: 50, minY: 50, maxY: 50,
@@ -116,7 +116,7 @@ describe('strokeHit', () => {
   })
 
   it('hits a single-point stroke within radius', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[50, 50]],
       minX: 50, maxX: 50, minY: 50, maxY: 50,
@@ -127,7 +127,7 @@ describe('strokeHit', () => {
   })
 
   it('misses a single-point stroke outside radius', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[0, 0]],
       minX: 0, maxX: 0, minY: 0, maxY: 0,
@@ -138,7 +138,7 @@ describe('strokeHit', () => {
   })
 
   it('hits a multi-point stroke near a segment', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[0, 0], [100, 0]],
       minX: 0, maxX: 100, minY: 0, maxY: 0,
@@ -150,7 +150,7 @@ describe('strokeHit', () => {
   })
 
   it('misses a multi-point stroke far from all segments', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[0, 0], [100, 0]],
       minX: 0, maxX: 100, minY: 0, maxY: 0,
@@ -161,7 +161,7 @@ describe('strokeHit', () => {
   })
 
   it('early-outs via AABB check (far outside)', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[10, 10], [20, 20]],
       minX: 10, maxX: 20, minY: 10, maxY: 20,
@@ -172,7 +172,7 @@ describe('strokeHit', () => {
   })
 
   it('hits vertical segment', () => {
-    const s = {
+    const s: Stroke = {
       id: '1',
       points: [[100, 0], [100, 200]],
       minX: 100, maxX: 100, minY: 0, maxY: 200,
