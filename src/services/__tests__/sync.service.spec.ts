@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useBoardStore } from '@/stores/board.store'
-import type { Stroke } from '@/types/board.types'
+import type { Stroke, StickyNote } from '@/types/board.types'
 
 const mockSocket = vi.hoisted(() => ({
   connected: false,
@@ -19,6 +19,14 @@ function fakeStroke(id: string): Stroke {
   return {
     id, points: [[0, 0]], color: '#000', width: 2,
     minX: 0, maxX: 0, minY: 0, maxY: 0,
+  }
+}
+
+function fakeSticky(id: string, overrides: Partial<StickyNote> = {}): StickyNote {
+  return {
+    id, x: 0, y: 0, width: 150, height: 150,
+    text: '', truncate: false, color: '#fff9c4',
+    ...overrides,
   }
 }
 
@@ -202,6 +210,40 @@ describe('sync service', () => {
 
       // No crash, no strokes added
     })
+
+    it('calls addStickyNote for sticky:add event', async () => {
+      await setupConnected()
+
+      const addEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sticky:add')
+      expect(addEntry).toBeDefined()
+      addEntry![1](fakeSticky('sticky-1', { text: 'hello' }))
+
+      expect(store.stickyNotes).toHaveLength(1)
+      expect(store.stickyNotes[0]!.id).toBe('sticky-1')
+    })
+
+    it('calls removeStickyNote for sticky:erase event', async () => {
+      await setupConnected()
+      store.addStickyNote(fakeSticky('a'))
+
+      const eraseEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sticky:erase')
+      expect(eraseEntry).toBeDefined()
+      eraseEntry![1]({ stickyId: 'a' })
+
+      expect(store.stickyNotes).toHaveLength(0)
+    })
+
+    it('calls updateStickyNote for sticky:update event', async () => {
+      await setupConnected()
+      store.addStickyNote(fakeSticky('a', { text: 'old', truncate: false }))
+
+      const updateEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'sticky:update')
+      expect(updateEntry).toBeDefined()
+      updateEntry![1]({ stickyId: 'a', text: 'new', truncate: true })
+
+      expect(store.stickyNotes[0]!.text).toBe('new')
+      expect(store.stickyNotes[0]!.truncate).toBe(true)
+    })
   })
 
   describe('handleSyncState', () => {
@@ -284,6 +326,39 @@ describe('sync service', () => {
       mockSocket.connected = false
 
       sync.sendStrokeErase(['a', 'b'])
+      expect(mockSocket.emit).not.toHaveBeenCalled()
+    })
+
+    it('queues sticky:add when offline', async () => {
+      const sync = await setupConnected()
+      mockSocket.connected = false
+      sync.sendStickyAdd(fakeSticky('offline-s'))
+      expect(mockSocket.emit).not.toHaveBeenCalled()
+    })
+
+    it('emits sticky:add when online', async () => {
+      await setupConnected()
+      mockSocket.connected = true
+      const connectEntry = mockSocket.on.mock.calls.find((c: [string]) => c[0] === 'connect')
+      expect(connectEntry).toBeDefined()
+      connectEntry![1]()
+      mockSocket.emit.mockClear()
+      const sync = await import('@/services/sync.service')
+      sync.sendStickyAdd(fakeSticky('online-s', { text: 'hi' }))
+      expect(mockSocket.emit).toHaveBeenCalledWith('sticky:add', expect.objectContaining({ id: 'online-s' }))
+    })
+
+    it('queues sticky:erase when offline', async () => {
+      const sync = await setupConnected()
+      mockSocket.connected = false
+      sync.sendStickyErase('a')
+      expect(mockSocket.emit).not.toHaveBeenCalled()
+    })
+
+    it('queues sticky:update when offline', async () => {
+      const sync = await setupConnected()
+      mockSocket.connected = false
+      sync.sendStickyUpdate('a', { text: 'new', truncate: true })
       expect(mockSocket.emit).not.toHaveBeenCalled()
     })
   })

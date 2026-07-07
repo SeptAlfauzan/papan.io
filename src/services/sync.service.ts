@@ -33,7 +33,7 @@ type QueuedOp =
   | { event: 'stroke:erase'; data: { strokeIds: string[] } }
   | { event: 'sticky:add'; data: StickyNote }
   | { event: 'sticky:erase'; data: { stickyId: string } }
-  | { event: 'sticky:update'; data: { stickyId: string; patch: Record<string, unknown> } }
+  | { event: 'sticky:update'; data: { stickyId: string; text: string; truncate: boolean } }
 
 let socket: Socket | null = null
 let roomId = ''
@@ -69,6 +69,29 @@ export function connectSyncService(room: string): void {
   socket.on('message', handleIncoming)
   socket.on('stroke:add', handleIncoming)
   socket.on('stroke:erase', handleIncoming)
+  socket.on('sticky:add', (raw: unknown) => {
+    if (!store) return
+    const note = raw as StickyNote
+    if (note && note.id) store.addStickyNote(note)
+  })
+
+  socket.on('sticky:update', (raw: unknown) => {
+    if (!store) return
+    const body = raw as Record<string, unknown>
+    if (typeof body.stickyId === 'string') {
+      const patch: Partial<Pick<StickyNote, 'text' | 'truncate'>> = {}
+      if (typeof body.text === 'string') patch.text = body.text
+      if (typeof body.truncate === 'boolean') patch.truncate = body.truncate
+      store.updateStickyNote(body.stickyId, patch)
+    }
+  })
+
+  socket.on('sticky:erase', (raw: unknown) => {
+    if (!store) return
+    const body = raw as Record<string, unknown>
+    if (typeof body.stickyId === 'string') store.removeStickyNote(body.stickyId as string)
+  })
+
   socket.on('sync:state', handleSyncState)
   socket.on('connect_error', onError)
   socket.on('disconnect', onDisconnect)
@@ -147,6 +170,19 @@ function handleSyncState(raw: unknown): void {
   }
 
   store.replaceAllStrokes(parsedStrokes)
+
+  const rawStickyNotes = data.stickyNotes
+  if (Array.isArray(rawStickyNotes)) {
+    const parsed: StickyNote[] = []
+    for (const item of rawStickyNotes) {
+      if (!item || typeof item !== 'object') continue
+      const n = item as Record<string, unknown>
+      if (typeof n.id !== 'string') continue
+      parsed.push(n as unknown as StickyNote)
+    }
+    store.replaceAllStickyNotes(parsed)
+  }
+
   store.clearHistory()
 }
 
@@ -185,12 +221,15 @@ export function sendStickyAdd(note: StickyNote): void {
   tryEmit('sticky:add', note)
 }
 
-export function sendStickyErase(id: string): void {
-  tryEmit('sticky:erase', { stickyId: id })
+export function sendStickyErase(stickyId: string): void {
+  tryEmit('sticky:erase', { stickyId })
 }
 
-export function sendStickyUpdate(id: string, patch: { text?: string; truncate?: boolean }): void {
-  tryEmit('sticky:update', { stickyId: id, patch })
+export function sendStickyUpdate(
+  stickyId: string,
+  patch: { text: string; truncate: boolean },
+): void {
+  tryEmit('sticky:update', { stickyId, ...patch })
 }
 
 // ── Queue flush & resync ────────────────────────────────────────────
