@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import type { StickyNote } from '@/types/board.types'
 
 const props = defineProps<{
@@ -13,6 +13,12 @@ const emit = defineEmits<{
 
 const text = ref(props.note.text)
 const truncate = ref(props.note.truncate)
+const textareaRef = ref<HTMLTextAreaElement | null>(null)
+
+onMounted(async () => {
+  await nextTick()
+  textareaRef.value?.focus()
+})
 
 function save(): void {
   emit('save', { text: text.value, truncate: truncate.value })
@@ -31,6 +37,7 @@ function onOverlayClick(e: MouseEvent): void {
       <h3 class="modal-title">Edit Sticky Note</h3>
 
       <textarea
+        ref="textareaRef"
         v-model="text"
         class="text-input"
         placeholder="Type your note..."

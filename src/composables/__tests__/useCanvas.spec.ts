@@ -4,13 +4,13 @@ import { defineComponent } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import { useBoardStore } from '@/stores/board.store'
 import { useCanvas } from '@/composables/useCanvas'
+import { sendStickyErase } from '@/services/sync.service'
 
 vi.mock('@/services/sync.service', () => ({
   sendStrokeAdd: vi.fn<(...args: unknown[]) => void>(),
   sendStrokeErase: vi.fn<(...args: unknown[]) => void>(),
   sendStickyAdd: vi.fn<(...args: unknown[]) => void>(),
   sendStickyErase: vi.fn<(...args: unknown[]) => void>(),
-  sendStickyUpdate: vi.fn<(...args: unknown[]) => void>(),
 }))
 
 let canvasApi: ReturnType<typeof useCanvas>
@@ -204,7 +204,7 @@ describe('useCanvas', () => {
     it('selects sticky note on click in hand mode', () => {
       const store = useBoardStore()
       store.addStickyNote({
-        id: 's1', x: 0, y: 0, width: 150, height: 150,
+        id: 's1', x: -75, y: -75, width: 150, height: 150,
         text: 'hello', truncate: false, color: '#fff9c4',
       })
       mountCanvasComponent()
@@ -216,6 +216,9 @@ describe('useCanvas', () => {
       canvasApi.onPointerUp(new PointerEvent('pointerup', {
         clientX: 400, clientY: 300, button: 0, pointerId: 1,
       }))
+
+      expect(store.stickyNotes).toHaveLength(1)
+      expect(canvasApi.editingStickyId.value).toBeNull()
     })
 
     it('exposes editingStickyId when double-clicking a sticky note', () => {
@@ -230,6 +233,70 @@ describe('useCanvas', () => {
         clientX: 400, clientY: 300, button: 0, pointerId: 1, detail: 2,
       }))
       expect(canvasApi.editingStickyId.value).toBe('s1')
+    })
+
+    it('detects double-tap via timing fallback (touch)', () => {
+      const store = useBoardStore()
+      store.addStickyNote({
+        id: 's1', x: -75, y: -75, width: 150, height: 150,
+        text: 'hello', truncate: false, color: '#fff9c4',
+      })
+      mountCanvasComponent()
+
+      // First tap — pointerdown + pointerup
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1, detail: 1,
+      }))
+      canvasApi.onPointerUp(new PointerEvent('pointerup', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+
+      // Second tap — pointerdown within 300ms should trigger via time check
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 401, clientY: 300, button: 0, pointerId: 2, detail: 1,
+      }))
+      expect(canvasApi.editingStickyId.value).toBe('s1')
+    })
+
+    it('deletes sticky note on Delete key when selected', () => {
+      const store = useBoardStore()
+      store.addStickyNote({
+        id: 's1', x: -75, y: -75, width: 150, height: 150,
+        text: 'hello', truncate: false, color: '#fff9c4',
+      })
+      mountCanvasComponent()
+      canvasApi.tool.value = 'hand'
+
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete' }))
+
+      expect(store.stickyNotes).toHaveLength(0)
+      expect(sendStickyErase).toHaveBeenCalledWith('s1')
+    })
+
+    it('eraser deletes sticky note with full coverage', () => {
+      const store = useBoardStore()
+      store.addStickyNote({
+        id: 's1', x: 0, y: 0, width: 150, height: 150,
+        text: 'hello', truncate: false, color: '#fff9c4',
+      })
+      mountCanvasComponent()
+      canvasApi.tool.value = 'eraser'
+
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+      canvasApi.onPointerMove(new PointerEvent('pointermove', {
+        clientX: 550, clientY: 450, button: 0, pointerId: 1,
+      }))
+      canvasApi.onPointerUp(new PointerEvent('pointerup', {
+        clientX: 550, clientY: 450, button: 0, pointerId: 1,
+      }))
+
+      expect(store.stickyNotes).toHaveLength(0)
+      expect(sendStickyErase).toHaveBeenCalledWith('s1')
     })
   })
 })

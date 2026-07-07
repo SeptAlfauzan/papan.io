@@ -179,6 +179,14 @@ export const useBoardStore = defineStore('board', () => {
     renderVersion.value++
   }
 
+  function removeStickyNotes(ids: string[]): void {
+    const removed = stickyNotes.value.filter(n => ids.includes(n.id))
+    if (removed.length === 0) return
+    stickyNotes.value = stickyNotes.value.filter(n => !ids.includes(n.id))
+    pushHistory({ type: 'sticky-erase', strokes: [], stickyNotes: removed })
+    renderVersion.value++
+  }
+
   function updateStickyNote(id: string, patch: Partial<Pick<StickyNote, 'text' | 'truncate'>>): void {
     const note = stickyNotes.value.find(n => n.id === id)
     if (!note) return
@@ -219,6 +227,7 @@ export const useBoardStore = defineStore('board', () => {
     replaceAllStrokes,
     addStickyNote,
     removeStickyNote,
+    removeStickyNotes,
     updateStickyNote,
     replaceAllStickyNotes,
     clearHistory,

@@ -16,7 +16,7 @@
 import { ref, reactive, computed, readonly, onMounted, onUnmounted } from 'vue'
 import type { Stroke, ToolMode, CameraState, Point, StickyNote } from '@/types/board.types'
 import { useBoardStore } from '@/stores/board.store'
-import { sendStrokeAdd, sendStrokeErase, sendStickyAdd, sendStickyErase, sendStickyUpdate } from '@/services/sync.service'
+import { sendStrokeAdd, sendStrokeErase, sendStickyAdd, sendStickyErase } from '@/services/sync.service'
 import {
   renderFrame,
   screenToWorld,
@@ -89,6 +89,9 @@ export function useCanvas() {
 
   let stickyPreviewPos: { x: number; y: number } | null = null
   let selectedStickyId: string | null = null
+  let lastPointerUpTime = 0
+  let lastPointerUpX = 0
+  let lastPointerUpY = 0
 
   /** In-progress stroke (mutable — dropped on undo / finalized on pointerup) */
   let drawState: Stroke | null = null
@@ -309,9 +312,9 @@ export function useCanvas() {
           deletedIds.push(n.id)
         }
       }
-      for (const id of deletedIds) {
-        store.removeStickyNote(id)
-        sendStickyErase(id)
+      if (deletedIds.length > 0) {
+        store.removeStickyNotes(deletedIds)
+        for (const id of deletedIds) sendStickyErase(id)
       }
     }
 
@@ -356,8 +359,13 @@ export function useCanvas() {
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     isPointerDown.value = true
 
-    // Double-click on sticky note
-    if (e.detail === 2) {
+    // Double-click on sticky note (detail-based + time-based fallback for touch)
+    const isDbl = e.detail >= 2 || (
+      lastPointerUpTime !== 0 && Date.now() - lastPointerUpTime < 300 &&
+      Math.abs(e.clientX - lastPointerUpX) < 30 &&
+      Math.abs(e.clientY - lastPointerUpY) < 30
+    )
+    if (isDbl) {
       const pos = { x: e.clientX, y: e.clientY }
       const w = screenToWorld(pos.x, pos.y, camera, canvasSize.w, canvasSize.h)
       const hit = store.stickyNotes.find(n =>
@@ -503,6 +511,9 @@ export function useCanvas() {
       finalizeStroke()
       finalizeErase()
       panState = null
+      lastPointerUpTime = Date.now()
+      lastPointerUpX = e.clientX
+      lastPointerUpY = e.clientY
     }
   }
 
@@ -549,6 +560,7 @@ export function useCanvas() {
 
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (selectedStickyId) {
+        editingStickyId.value = null
         store.removeStickyNote(selectedStickyId)
         sendStickyErase(selectedStickyId)
         selectedStickyId = null
