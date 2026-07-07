@@ -170,11 +170,10 @@ function drawStickyNote(
     }
 
     // Simple word wrap
-    const words = displayText.split('')
     let line = ''
     let lineY = y + padding
 
-    for (const char of text) {
+    for (const char of displayText) {
       const testLine = line + char
       const metrics = ctx.measureText(testLine)
       if (metrics.width > maxWidth && line.length > 0) {
