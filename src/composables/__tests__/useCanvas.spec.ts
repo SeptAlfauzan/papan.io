@@ -8,19 +8,34 @@ import { useCanvas } from '@/composables/useCanvas'
 vi.mock('@/services/sync.service', () => ({
   sendStrokeAdd: vi.fn<(...args: unknown[]) => void>(),
   sendStrokeErase: vi.fn<(...args: unknown[]) => void>(),
+  sendStickyAdd: vi.fn<(...args: unknown[]) => void>(),
+  sendStickyErase: vi.fn<(...args: unknown[]) => void>(),
+  sendStickyUpdate: vi.fn<(...args: unknown[]) => void>(),
 }))
 
 let canvasApi: ReturnType<typeof useCanvas>
 
 function mountCanvasComponent() {
+  // jsdom doesn't support setPointerCapture or CSS layout
+  if (!HTMLCanvasElement.prototype.setPointerCapture) {
+    HTMLCanvasElement.prototype.setPointerCapture = vi.fn()
+  }
+  if (!HTMLCanvasElement.prototype.getContext) {
+    HTMLCanvasElement.prototype.getContext = vi.fn()
+  }
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getBoundingClientRect', {
+    value: () => ({ top: 0, left: 0, bottom: 600, right: 800, width: 800, height: 600, x: 0, y: 0 }),
+    configurable: true,
+  })
   const wrapper = mount(
     defineComponent({
       setup() {
         canvasApi = useCanvas()
         return canvasApi
       },
-      template: '<canvas ref="canvasEl" style="width:800px;height:600px" />',
+      template: '<canvas ref="canvasEl" style="width:800px;height:600px" @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointerleave="onPointerLeave" @wheel="onWheel" />',
     }),
+    { attachTo: document.body },
   )
   return wrapper
 }
@@ -160,6 +175,61 @@ describe('useCanvas', () => {
       mountCanvasComponent()
       canvasApi.resetView()
       expect(canvasApi.zoomDisplay.value).toBe(100)
+    })
+  })
+
+  describe('sticky note tool', () => {
+    it('switches to sticky-note tool via keyboard S', () => {
+      mountCanvasComponent()
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 's' }))
+      expect(canvasApi.tool.value).toBe('sticky-note')
+    })
+
+    it('adds sticky note on canvas click in sticky-note mode', () => {
+      const store = useBoardStore()
+      mountCanvasComponent()
+      canvasApi.tool.value = 'sticky-note'
+
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+      canvasApi.onPointerUp(new PointerEvent('pointerup', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+
+      expect(store.stickyNotes).toHaveLength(1)
+      expect(store.stickyNotes[0]!.text).toBe('')
+    })
+
+    it('selects sticky note on click in hand mode', () => {
+      const store = useBoardStore()
+      store.addStickyNote({
+        id: 's1', x: 0, y: 0, width: 150, height: 150,
+        text: 'hello', truncate: false, color: '#fff9c4',
+      })
+      mountCanvasComponent()
+      canvasApi.tool.value = 'hand'
+
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+      canvasApi.onPointerUp(new PointerEvent('pointerup', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1,
+      }))
+    })
+
+    it('exposes editingStickyId when double-clicking a sticky note', () => {
+      const store = useBoardStore()
+      store.addStickyNote({
+        id: 's1', x: -75, y: -75, width: 150, height: 150,
+        text: 'hello', truncate: false, color: '#fff9c4',
+      })
+      mountCanvasComponent()
+
+      canvasApi.onPointerDown(new PointerEvent('pointerdown', {
+        clientX: 400, clientY: 300, button: 0, pointerId: 1, detail: 2,
+      }))
+      expect(canvasApi.editingStickyId.value).toBe('s1')
     })
   })
 })

@@ -14,7 +14,7 @@
 import { ref, computed } from 'vue'
 import { io, type Socket } from 'socket.io-client'
 import { env } from '@/configs/env'
-import type { Stroke, ConnectionStatus } from '@/types/board.types'
+import type { Stroke, StickyNote, ConnectionStatus } from '@/types/board.types'
 import type { useBoardStore } from '@/stores/board.store'
 
 // ── Exported reactive state ─────────────────────────────────────────
@@ -31,6 +31,9 @@ export const statusLabel = computed(() => {
 type QueuedOp =
   | { event: 'stroke:add'; data: Stroke }
   | { event: 'stroke:erase'; data: { strokeIds: string[] } }
+  | { event: 'sticky:add'; data: StickyNote }
+  | { event: 'sticky:erase'; data: { stickyId: string } }
+  | { event: 'sticky:update'; data: { stickyId: string; patch: Record<string, unknown> } }
 
 let socket: Socket | null = null
 let roomId = ''
@@ -176,6 +179,18 @@ export function sendStrokeAdd(stroke: Stroke): void {
 export function sendStrokeErase(strokeIds: string[]): void {
   if (strokeIds.length === 0) return
   tryEmit('stroke:erase', { strokeIds })
+}
+
+export function sendStickyAdd(note: StickyNote): void {
+  tryEmit('sticky:add', note)
+}
+
+export function sendStickyErase(id: string): void {
+  tryEmit('sticky:erase', { stickyId: id })
+}
+
+export function sendStickyUpdate(id: string, patch: { text?: string; truncate?: boolean }): void {
+  tryEmit('sticky:update', { stickyId: id, patch })
 }
 
 // ── Queue flush & resync ────────────────────────────────────────────

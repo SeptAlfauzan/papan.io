@@ -13,10 +13,10 @@
  * (plain JS objects). Only UI-facing values (zoomDisplay, cursorStyle,
  * culledStats) are reactive.
  */
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import type { Stroke, ToolMode, CameraState, Point } from '@/types/board.types'
+import { ref, reactive, computed, readonly, onMounted, onUnmounted } from 'vue'
+import type { Stroke, ToolMode, CameraState, Point, StickyNote } from '@/types/board.types'
 import { useBoardStore } from '@/stores/board.store'
-import { sendStrokeAdd, sendStrokeErase } from '@/services/sync.service'
+import { sendStrokeAdd, sendStrokeErase, sendStickyAdd, sendStickyErase, sendStickyUpdate } from '@/services/sync.service'
 import {
   renderFrame,
   screenToWorld,
@@ -24,6 +24,7 @@ import {
   boundsIntersect,
   strokeErasedPoints,
   ERASE_RADIUS_SCREEN,
+  stickyNoteHit,
 } from '@/services/canvas-engine'
 import type { ErasePreviewData } from '@/services/canvas-engine'
 
@@ -64,6 +65,8 @@ export function useCanvas() {
   const canUndo = computed(() => store.canUndo)
   const canRedo = computed(() => store.canRedo)
 
+  const editingStickyId = ref<string | null>(null)
+
   const cursorStyle = computed(() => {
     const t = spaceHeld.value ? 'hand' : tool.value
     if (t === 'hand') return isPointerDown.value ? 'grabbing' : 'grab'
@@ -83,6 +86,9 @@ export function useCanvas() {
   const activePointers = new Map<number, { x: number; y: number }>()
   let panState: { lastX: number; lastY: number } | null = null
   let pinchState: { lastDist: number; lastMid: { x: number; y: number } } | null = null
+
+  let stickyPreviewPos: { x: number; y: number } | null = null
+  let selectedStickyId: string | null = null
 
   /** In-progress stroke (mutable — dropped on undo / finalized on pointerup) */
   let drawState: Stroke | null = null
@@ -156,6 +162,9 @@ export function useCanvas() {
       }
     }
 
+    const stickyNotesArr = store.stickyNotes as StickyNote[]
+    const spPos = tool.value === 'sticky-note' ? stickyPreviewPos : null
+
     const res = renderFrame(
       ctx,
       el.width,
@@ -165,11 +174,13 @@ export function useCanvas() {
       dpr,
       camera,
       allStrokes,
+      stickyNotesArr,
       hoverPos,
       tool.value,
       color.value,
       strokeWidth.value,
       erasePreview,
+      spPos,
     )
     culledStats.rendered = res.rendered
     culledStats.total = res.total
@@ -274,6 +285,36 @@ export function useCanvas() {
   function finalizeErase(): void {
     if (!eraseState) return
 
+    // Sticky note eraser deletion
+    if (eraseState.trail.length > 0) {
+      let tMinX = Infinity, tMaxX = -Infinity, tMinY = Infinity, tMaxY = -Infinity
+      for (const p of eraseState.trail) {
+        if (p.x < tMinX) tMinX = p.x
+        if (p.x > tMaxX) tMaxX = p.x
+        if (p.y < tMinY) tMinY = p.y
+        if (p.y > tMaxY) tMaxY = p.y
+      }
+      const worldTL = screenToWorld(tMinX, tMinY, camera, canvasSize.w, canvasSize.h)
+      const worldBR = screenToWorld(tMaxX, tMaxY, camera, canvasSize.w, canvasSize.h)
+      const trailUnion = {
+        minX: Math.min(worldTL.x, worldBR.x),
+        maxX: Math.max(worldTL.x, worldBR.x),
+        minY: Math.min(worldTL.y, worldBR.y),
+        maxY: Math.max(worldTL.y, worldBR.y),
+      }
+
+      const deletedIds: string[] = []
+      for (const n of store.stickyNotes) {
+        if (stickyNoteHit(n, trailUnion)) {
+          deletedIds.push(n.id)
+        }
+      }
+      for (const id of deletedIds) {
+        store.removeStickyNote(id)
+        sendStickyErase(id)
+      }
+    }
+
     const originals: Stroke[] = []
     const fragments: Stroke[] = []
 
@@ -315,10 +356,41 @@ export function useCanvas() {
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     isPointerDown.value = true
 
+    // Double-click on sticky note
+    if (e.detail === 2) {
+      const pos = { x: e.clientX, y: e.clientY }
+      const w = screenToWorld(pos.x, pos.y, camera, canvasSize.w, canvasSize.h)
+      const hit = store.stickyNotes.find(n =>
+        w.x >= n.x && w.x <= n.x + n.width &&
+        w.y >= n.y && w.y <= n.y + n.height
+      )
+      if (hit) {
+        selectedStickyId = hit.id
+        editingStickyId.value = hit.id
+        return
+      }
+    }
+
     if (activePointers.size === 1) {
       const pos = { x: e.clientX, y: e.clientY }
       hoverPos = pos
       const t = effectiveTool()
+
+      // Sticky selection in hand mode
+      if (t === 'hand' && e.button === 0) {
+        const w = screenToWorld(pos.x, pos.y, camera, canvasSize.w, canvasSize.h)
+        const hit = store.stickyNotes.find(n =>
+          w.x >= n.x && w.x <= n.x + n.width &&
+          w.y >= n.y && w.y <= n.y + n.height
+        )
+        if (hit) {
+          selectedStickyId = hit.id
+          requestRedraw()
+          return
+        } else {
+          selectedStickyId = null
+        }
+      }
 
       if (t === 'hand' || e.button === 1) {
         panState = { lastX: pos.x, lastY: pos.y }
@@ -334,6 +406,21 @@ export function useCanvas() {
       } else if (t === 'eraser' && e.button === 0) {
         eraseState = { cutStrokes: new Map(), fullyErasedIds: new Set(), trail: [] }
         eraseAt(pos.x, pos.y)
+      } else if (t === 'sticky-note' && e.button === 0) {
+        const w = screenToWorld(pos.x, pos.y, camera, canvasSize.w, canvasSize.h)
+        const note: StickyNote = {
+          id: uid(),
+          x: w.x - 75,
+          y: w.y - 75,
+          width: 150,
+          height: 150,
+          text: '',
+          truncate: false,
+          color: '#fff9c4',
+        }
+        store.addStickyNote(note)
+        sendStickyAdd(note)
+        requestRedraw()
       }
       requestRedraw()
     } else if (activePointers.size === 2) {
@@ -349,7 +436,13 @@ export function useCanvas() {
   function onPointerMove(e: PointerEvent): void {
     if (!activePointers.has(e.pointerId)) {
       hoverPos = { x: e.clientX, y: e.clientY }
-      if (tool.value === 'pencil' || tool.value === 'eraser') requestRedraw()
+      if (tool.value === 'pencil' || tool.value === 'eraser' || tool.value === 'sticky-note') {
+        if (tool.value === 'sticky-note') {
+          const w = screenToWorld(hoverPos.x, hoverPos.y, camera, canvasSize.w, canvasSize.h)
+          stickyPreviewPos = { x: w.x, y: w.y }
+        }
+        requestRedraw()
+      }
       return
     }
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
@@ -451,6 +544,17 @@ export function useCanvas() {
       if (e.key === 'p' || e.key === 'P') tool.value = 'pencil'
       if (e.key === 'h' || e.key === 'H') tool.value = 'hand'
       if (e.key === 'e' || e.key === 'E') tool.value = 'eraser'
+      if (e.key === 's' || e.key === 'S') tool.value = 'sticky-note'
+    }
+
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selectedStickyId) {
+        store.removeStickyNote(selectedStickyId)
+        sendStickyErase(selectedStickyId)
+        selectedStickyId = null
+        e.preventDefault()
+        return
+      }
     }
   }
 
@@ -465,6 +569,9 @@ export function useCanvas() {
     drawState = null
     eraseState = null
     isPointerDown.value = false
+    stickyPreviewPos = null
+    selectedStickyId = null
+    editingStickyId.value = null
     requestRedraw()
   }
 
@@ -522,6 +629,7 @@ export function useCanvas() {
     canRedo,
     culledStats,
     cursorStyle,
+    editingStickyId: readonly(editingStickyId),
     onPointerDown,
     onPointerMove,
     onPointerUp,

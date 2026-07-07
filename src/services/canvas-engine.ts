@@ -411,6 +411,7 @@ export function renderFrame(
   color: string,
   strokeWidth: number,
   erasePreview?: ErasePreviewData | null,
+  stickyPreviewPos?: { x: number; y: number } | null,
 ): RenderResult {
   // Reset to identity for full clear
   ctx.setTransform(1, 0, 0, 1, 0, 0)
@@ -442,6 +443,17 @@ export function renderFrame(
     if (boundsIntersect({ minX: n.x, maxX: n.x + n.width, minY: n.y, maxY: n.y + n.height } as Stroke, vp)) {
       drawStickyNote(ctx, n)
     }
+  }
+
+  // Sticky note preview (for sticky-note tool hover)
+  if (stickyPreviewPos) {
+    ctx.fillStyle = 'rgba(255,249,196,0.2)'
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.roundRect(stickyPreviewPos.x - 75, stickyPreviewPos.y - 75, 150, 150, 4)
+    ctx.fill()
+    ctx.stroke()
   }
 
   // Switch back to screen-space for overlays
