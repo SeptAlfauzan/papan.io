@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useBoardStore } from '../board.store'
-import type { Stroke } from '@/types/board.types'
+import type { Stroke, StickyNote } from '@/types/board.types'
 
 function fakeStroke(id: string, overrides: Partial<Stroke> = {}): Stroke {
   return {
@@ -296,5 +296,125 @@ describe('board store', () => {
       store.clearHistory()
       expect(store.strokes).toHaveLength(1)
     })
+  })
+})
+
+function fakeSticky(id: string, overrides: Partial<StickyNote> = {}): StickyNote {
+  return {
+    id,
+    x: 0, y: 0, width: 150, height: 150,
+    text: '', truncate: false, color: '#fff9c4',
+    ...overrides,
+  }
+}
+
+describe('sticky note store', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('starts with empty stickyNotes', () => {
+    const store = useBoardStore()
+    expect(store.stickyNotes).toEqual([])
+  })
+
+  it('addStickyNote appends note and bumps renderVersion', () => {
+    const store = useBoardStore()
+    const n = fakeSticky('s1', { text: 'hello', x: 100, y: 200 })
+    store.addStickyNote(n)
+    expect(store.stickyNotes).toHaveLength(1)
+    expect(store.stickyNotes[0]!.id).toBe('s1')
+    expect(store.renderVersion).toBe(1)
+    const entry = store.historyStack[store.historyIndex]!
+    expect(entry.type).toBe('sticky-add')
+  })
+
+  it('removeStickyNote removes by id and bumps renderVersion', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    store.addStickyNote(fakeSticky('b'))
+    const ver = store.renderVersion
+    store.removeStickyNote('a')
+    expect(store.stickyNotes).toHaveLength(1)
+    expect(store.stickyNotes[0]!.id).toBe('b')
+    expect(store.renderVersion).toBeGreaterThan(ver)
+  })
+
+  it('removeStickyNote creates sticky-erase history entry', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    store.removeStickyNote('a')
+    const entry = store.historyStack[store.historyIndex]!
+    expect(entry.type).toBe('sticky-erase')
+    expect(entry.stickyNotes).toHaveLength(1)
+    expect(entry.stickyNotes![0]!.id).toBe('a')
+  })
+
+  it('updateStickyNote patches note text/truncate and bumps renderVersion', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a', { text: 'old', truncate: false }))
+    const ver = store.renderVersion
+    store.updateStickyNote('a', { text: 'new text', truncate: true })
+    expect(store.stickyNotes[0]!.text).toBe('new text')
+    expect(store.stickyNotes[0]!.truncate).toBe(true)
+    expect(store.renderVersion).toBeGreaterThan(ver)
+  })
+
+  it('updateStickyNote auto-sizes width/height when text changes', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a', { text: '', width: 150, height: 150 }))
+    store.updateStickyNote('a', { text: 'hello world' })
+    const note = store.stickyNotes[0]!
+    expect(note.text).toBe('hello world')
+    expect(note.width).toBeGreaterThan(50)
+    expect(note.height).toBeGreaterThan(50)
+  })
+
+  it('updateStickyNote creates sticky-edit history entry', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    store.updateStickyNote('a', { text: 'edited' })
+    const entry = store.historyStack[store.historyIndex]!
+    expect(entry.type).toBe('sticky-edit')
+  })
+
+  it('undo on sticky-add removes the note', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    store.undo()
+    expect(store.stickyNotes).toHaveLength(0)
+  })
+
+  it('redo on sticky-add restores the note', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    store.undo()
+    store.redo()
+    expect(store.stickyNotes).toHaveLength(1)
+  })
+
+  it('undo on sticky-edit reverts text to previous value', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a', { text: 'original', truncate: false }))
+    store.updateStickyNote('a', { text: 'edited', truncate: true })
+    store.undo()
+    expect(store.stickyNotes[0]!.text).toBe('original')
+    expect(store.stickyNotes[0]!.truncate).toBe(false)
+  })
+
+  it('replaceAllStickyNotes replaces entire array', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    const newNotes = [fakeSticky('x'), fakeSticky('y')]
+    store.replaceAllStickyNotes(newNotes)
+    expect(store.stickyNotes).toEqual(newNotes)
+  })
+
+  it('clearHistory resets stack without affecting stickyNotes', () => {
+    const store = useBoardStore()
+    store.addStickyNote(fakeSticky('a'))
+    store.clearHistory()
+    expect(store.stickyNotes).toHaveLength(1)
+    expect(store.historyIndex).toBe(-1)
   })
 })

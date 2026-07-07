@@ -35,9 +35,10 @@ export interface CameraState {
 
 /** Operation stored in undo/redo history */
 export interface HistoryEntry {
-  type: 'add' | 'erase'
+  type: 'add' | 'erase' | 'sticky-add' | 'sticky-edit' | 'sticky-erase'
   strokes: Stroke[]
   additions?: Stroke[]
+  stickyNotes?: StickyNote[]
 }
 
 /** Connection status for WebSocket */

@@ -1,6 +1,6 @@
 import { ref, computed, readonly } from 'vue'
 import { defineStore } from 'pinia'
-import type { Stroke, HistoryEntry } from '@/types/board.types'
+import type { Stroke, StickyNote, HistoryEntry } from '@/types/board.types'
 
 /**
  * Board store — single source of truth for all stroke data.
@@ -16,6 +16,7 @@ import type { Stroke, HistoryEntry } from '@/types/board.types'
 export const useBoardStore = defineStore('board', () => {
   // ── State ────────────────────────────────────────────────────────
   const strokes = ref<Stroke[]>([])
+  const stickyNotes = ref<StickyNote[]>([])
   const historyStack = ref<HistoryEntry[]>([])
   const historyIndex = ref(-1)
   /** Monotonically increasing counter — bump to schedule a canvas redraw */
@@ -91,6 +92,18 @@ export const useBoardStore = defineStore('board', () => {
       } else {
         strokes.value = [...strokes.value, ...entry.strokes]
       }
+    } else if (entry.type === 'sticky-add') {
+      const ids = new Set(entry.stickyNotes?.map(n => n.id) ?? [])
+      stickyNotes.value = stickyNotes.value.filter(n => !ids.has(n.id))
+    } else if (entry.type === 'sticky-erase') {
+      if (entry.stickyNotes) stickyNotes.value = [...stickyNotes.value, ...entry.stickyNotes]
+    } else if (entry.type === 'sticky-edit') {
+      const prev = entry.stickyNotes?.[0]
+      if (prev) {
+        const idx = stickyNotes.value.findIndex(n => n.id === prev.id)
+        if (idx !== -1) stickyNotes.value[idx] = { ...prev }
+        stickyNotes.value = [...stickyNotes.value]
+      }
     }
     historyIndex.value--
     renderVersion.value++
@@ -112,6 +125,19 @@ export const useBoardStore = defineStore('board', () => {
         const ids = new Set(entry.strokes.map((s) => s.id))
         strokes.value = strokes.value.filter((s) => !ids.has(s.id))
       }
+    } else if (entry.type === 'sticky-add') {
+      if (entry.stickyNotes) stickyNotes.value = [...stickyNotes.value, ...entry.stickyNotes]
+    } else if (entry.type === 'sticky-erase') {
+      const ids = new Set(entry.stickyNotes?.map(n => n.id) ?? [])
+      stickyNotes.value = stickyNotes.value.filter(n => !ids.has(n.id))
+    } else if (entry.type === 'sticky-edit') {
+      const next = entry.stickyNotes?.[1]
+      if (next) {
+        const idx = stickyNotes.value.findIndex(n => n.id === next.id)
+        if (idx !== -1) stickyNotes.value[idx] = { ...next }
+        else stickyNotes.value = [...stickyNotes.value, { ...next }]
+        stickyNotes.value = [...stickyNotes.value]
+      }
     }
     renderVersion.value++
   }
@@ -119,6 +145,54 @@ export const useBoardStore = defineStore('board', () => {
   /** Replace all strokes (used during full state sync after reconnect) */
   function replaceAllStrokes(newStrokes: Stroke[]): void {
     strokes.value = newStrokes
+    renderVersion.value++
+  }
+
+  // ── Sticky note mutations ─────────────────────────────────────────
+
+  function autoSizeNote(note: StickyNote): void {
+    const charWidth = 8
+    const lineHeight = 20
+    const padding = 24
+    const maxLineChars = 20
+    const lines = note.text ? Math.ceil(note.text.length / maxLineChars) : 1
+    const w = note.text.length > 0
+      ? Math.max(Math.min(note.text.length * charWidth + padding, maxLineChars * charWidth + padding), 150)
+      : 150
+    const h = Math.max(lines * lineHeight + padding, 100)
+    note.width = w
+    note.height = h
+  }
+
+  function addStickyNote(note: StickyNote): void {
+    autoSizeNote(note)
+    stickyNotes.value = [...stickyNotes.value, note]
+    pushHistory({ type: 'sticky-add', strokes: [], stickyNotes: [note] })
+    renderVersion.value++
+  }
+
+  function removeStickyNote(id: string): void {
+    const removed = stickyNotes.value.find(n => n.id === id)
+    if (!removed) return
+    stickyNotes.value = stickyNotes.value.filter(n => n.id !== id)
+    pushHistory({ type: 'sticky-erase', strokes: [], stickyNotes: [removed] })
+    renderVersion.value++
+  }
+
+  function updateStickyNote(id: string, patch: Partial<Pick<StickyNote, 'text' | 'truncate'>>): void {
+    const note = stickyNotes.value.find(n => n.id === id)
+    if (!note) return
+    const prev = { ...note }
+    if (patch.text !== undefined) note.text = patch.text
+    if (patch.truncate !== undefined) note.truncate = patch.truncate
+    autoSizeNote(note)
+    const next = { ...note }
+    pushHistory({ type: 'sticky-edit', strokes: [], stickyNotes: [prev, next] })
+    renderVersion.value++
+  }
+
+  function replaceAllStickyNotes(notes: StickyNote[]): void {
+    stickyNotes.value = notes
     renderVersion.value++
   }
 
@@ -131,6 +205,7 @@ export const useBoardStore = defineStore('board', () => {
   // ── Public API ───────────────────────────────────────────────────
   return {
     strokes: readonly(strokes),
+    stickyNotes: readonly(stickyNotes),
     historyStack: readonly(historyStack),
     historyIndex: readonly(historyIndex),
     renderVersion: readonly(renderVersion),
@@ -142,6 +217,10 @@ export const useBoardStore = defineStore('board', () => {
     undo,
     redo,
     replaceAllStrokes,
+    addStickyNote,
+    removeStickyNote,
+    updateStickyNote,
+    replaceAllStickyNotes,
     clearHistory,
   }
 })
