@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Infinite Canvas</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.5.39/vue.global.prod.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --toolbar-bg: #1c1c1e;
+    --toolbar-border: #2e2e30;
+    --accent: #8b5cf6;
+    --accent-soft: rgba(139, 92, 246, 0.18);
+    --icon: #e7e7ea;
+    --icon-dim: #8a8a90;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; width: 100%;
+    overflow: hidden; overscroll-behavior: none;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app { position: relative; width: 100vw; height: 100vh; }
+
+  canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+    touch-action: none; /* let us own all pan/zoom/erase gestures */
+    background: var(--bg);
+  }
+
+  .stats-badge {
+    position: absolute; top: 16px; right: 16px;
+    background: rgba(28, 28, 30, 0.85); color: #d8d8dc;
+    font-size: 12px; letter-spacing: 0.02em;
+    padding: 6px 10px; border-radius: 8px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+    backdrop-filter: blur(6px);
+  }
+
+  .hint {
+    position: absolute; top: 16px; left: 16px;
+    background: rgba(28, 28, 30, 0.85); color: #d8d8dc;
+    font-size: 11.5px; line-height: 1.5;
+    padding: 8px 12px; border-radius: 8px;
+    pointer-events: none;
+    max-width: 240px;
+  }
+
+  .toolbar {
+    position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 4px;
+    background: var(--toolbar-bg); border: 1px solid var(--toolbar-border);
+    padding: 6px; border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+    user-select: none;
+  }
+  .toolbar button {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: none; border-radius: 9px;
+    color: var(--icon-dim); cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  }
+  .toolbar button svg { width: 18px; height: 18px; }
+  .toolbar button:hover:not(:disabled) { background: #2a2a2d; color: var(--icon); }
+  .toolbar button:active:not(:disabled) { transform: scale(0.92); }
+  .toolbar button.active { background: var(--accent-soft); color: var(--accent); }
+  .toolbar button:disabled { opacity: 0.35; cursor: default; }
+  .toolbar .divider { width: 1px; height: 22px; background: var(--toolbar-border); margin: 0 4px; }
+
+  .toolbar input[type="color"] {
+    width: 30px; height: 30px; border: none; border-radius: 8px;
+    background: none; padding: 0; cursor: pointer;
+  }
+  .toolbar input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+  .toolbar input[type="color"]::-webkit-color-swatch { border-radius: 6px; border: 1px solid var(--toolbar-border); }
+
+  .toolbar input[type="range"] { width: 80px; accent-color: var(--accent); margin: 0 4px; }
+
+  .size-label {
+    color: var(--icon-dim); font-size: 11px; width: 28px;
+    text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .zoom-readout {
+    font-size: 12px !important; width: 50px !important;
+    color: var(--icon-dim); font-variant-numeric: tabular-nums;
+  }
+  .zoom-readout:hover { color: var(--icon); }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas
+    ref="canvasEl"
+    :style="{ cursor: cursorStyle }"
+    @pointerdown="onPointerDown"
+    @pointermove="onPointerMove"
+    @pointerup="onPointerUp"
+    @pointercancel="onPointerUp"
+    @pointerleave="onPointerLeave"
+    @wheel.prevent="onWheel"
+    @contextmenu.prevent
+  ></canvas>
+
+  <div class="hint">
+    Pencil to draw &middot; Hand tool or middle-click to pan &middot; trackpad
+    two-finger scroll pans, pinch or Ctrl+scroll zooms &middot; two-finger
+    touch pans &amp; zooms &middot; hold Space to pan temporarily
+  </div>
+
+  <div class="stats-badge">{{ culledStats.rendered }} / {{ culledStats.total }} strokes rendered (culled)</div>
+
+  <div class="toolbar">
+    <button :class="{ active: tool === 'pencil' }" @click="tool = 'pencil'" title="Pencil (P)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <line x1="4" y1="20" x2="20" y2="4"/>
+        <polyline points="4 17 4 20 7 20"/>
+        <line x1="13.5" y1="7.5" x2="16.5" y2="10.5"/>
+      </svg>
+    </button>
+    <button :class="{ active: tool === 'hand' }" @click="tool = 'hand'" title="Hand tool (H)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <line x1="12" y1="3" x2="12" y2="21"/>
+        <line x1="3" y1="12" x2="21" y2="12"/>
+        <polyline points="9 6 12 3 15 6"/>
+        <polyline points="9 18 12 21 15 18"/>
+        <polyline points="6 9 3 12 6 15"/>
+        <polyline points="18 9 21 12 18 15"/>
+      </svg>
+    </button>
+    <button :class="{ active: tool === 'eraser' }" @click="tool = 'eraser'" title="Eraser (E)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <rect x="4" y="9" width="16" height="9" rx="2"/>
+        <line x1="4" y1="14" x2="20" y2="14"/>
+        <line x1="9" y1="9" x2="9" y2="18"/>
+      </svg>
+    </button>
+
+    <div class="divider"></div>
+
+    <button @click="undo" :disabled="!canUndo" title="Undo (Ctrl+Z)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <path d="M7 8H4V5"/>
+        <path d="M4.5 15a8 8 0 1 0 2.5-9.5L4 8"/>
+      </svg>
+    </button>
+    <button @click="redo" :disabled="!canRedo" title="Redo (Ctrl+Shift+Z)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17 8h3V5"/>
+        <path d="M19.5 15a8 8 0 1 1-2.5-9.5L20 8"/>
+      </svg>
+    </button>
+
+    <div class="divider"></div>
+
+    <input type="color" v-model="color" title="Color" />
+    <input type="range" min="1" max="40" v-model.number="strokeWidth" title="Stroke size" />
+    <span class="size-label">{{ strokeWidth }}px</span>
+
+    <div class="divider"></div>
+
+    <button @click="zoomOutBtn" title="Zoom out">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" xmlns="http://www.w3.org/2000/svg"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <button class="zoom-readout" @click="resetView" title="Reset view">{{ zoomDisplay }}%</button>
+    <button @click="zoomInBtn" title="Zoom in">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" xmlns="http://www.w3.org/2000/svg"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount } = Vue;
+
+createApp({
+  setup() {
+    // ---------------------------------------------------------------
+    // Reactive UI state (small scalars only -- see approach notes for
+    // why the actual stroke data is deliberately kept OUT of Vue's
+    // reactivity system).
+    // ---------------------------------------------------------------
+    const canvasEl = ref(null);
+    const tool = ref('pencil');          // 'pencil' | 'hand' | 'eraser'
+    const color = ref('#3a3a3c');
+    const strokeWidth = ref(4);
+    const zoomDisplay = ref(100);        // integer percent, for the UI only
+    const canUndo = ref(false);
+    const canRedo = ref(false);
+    const spaceHeld = ref(false);
+    const isPointerDown = ref(false);
+    const culledStats = reactive({ rendered: 0, total: 0 });
+
+    const cursorStyle = computed(() => {
+      const t = spaceHeld.value ? 'hand' : tool.value;
+      if (t === 'hand') return isPointerDown.value ? 'grabbing' : 'grab';
+      return 'none'; // pencil/eraser draw their own on-canvas preview circle
+    });
+
+    // ---------------------------------------------------------------
+    // World-space state. Plain JS, not Vue-reactive on purpose.
+    // ---------------------------------------------------------------
+    const camera = { x: 0, y: 0, zoom: 1 };   // world coords at screen centre
+    const canvasSize = { w: 0, h: 0 };        // CSS pixels
+    const MIN_ZOOM = 0.05;
+    const MAX_ZOOM = 8;
+    const GRID_SPACING = 40;                  // world units
+    const ERASE_RADIUS_SCREEN = 16;           // screen px
+
+    let ctx = null;
+    let strokes = [];        // { id, points:[{x,y}], color, width, minX,maxX,minY,maxY }
+    let strokeSeq = 0;
+    let dirty = true;
+    let rafId = null;
+    let hoverPos = null;     // last known pointer position, for the brush preview
+
+    // gesture tracking
+    const activePointers = new Map(); // pointerId -> {x,y}
+    let panState = null;     // { lastX, lastY }
+    let pinchState = null;   // { lastDist, lastMid }
+    let drawState = null;    // stroke currently being drawn
+    let eraseState = null;   // { erasedIds:Set, removedStrokes:[] }
+
+    // history (undo/redo) -- also plain JS, see approach notes
+    let historyStack = [];
+    let historyIndex = -1;
+
+    // ---------------------------------------------------------------
+    // Coordinate helpers
+    // ---------------------------------------------------------------
+    function screenToWorld(sx, sy) {
+      return {
+        x: (sx - canvasSize.w / 2) / camera.zoom + camera.x,
+        y: (sy - canvasSize.h / 2) / camera.zoom + camera.y,
+      };
+    }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+    function midpoint(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+
+    function moveCamera(dx, dy) {
+      camera.x += dx / camera.zoom;
+      camera.y += dy / camera.zoom;
+      requestRedraw();
+    }
+
+    // Keeps the world point under (sx,sy) glued to the cursor while zooming.
+    function zoomAt(sx, sy, newZoom) {
+      newZoom = clamp(newZoom, MIN_ZOOM, MAX_ZOOM);
+      const before = screenToWorld(sx, sy);
+      camera.zoom = newZoom;
+      const after = screenToWorld(sx, sy);
+      camera.x += before.x - after.x;
+      camera.y += before.y - after.y;
+      zoomDisplay.value = Math.round(newZoom * 100);
+      requestRedraw();
+    }
+
+    function requestRedraw() { dirty = true; }
+
+    // ---------------------------------------------------------------
+    // Viewport + culling
+    // ---------------------------------------------------------------
+    function getViewportBounds() {
+      const halfW = canvasSize.w / 2 / camera.zoom;
+      const halfH = canvasSize.h / 2 / camera.zoom;
+      return {
+        minX: camera.x - halfW, maxX: camera.x + halfW,
+        minY: camera.y - halfH, maxY: camera.y + halfH,
+      };
+    }
+    function boundsIntersect(s, vp) {
+      return s.maxX >= vp.minX && s.minX <= vp.maxX && s.maxY >= vp.minY && s.minY <= vp.maxY;
+    }
+
+    // ---------------------------------------------------------------
+    // Rendering
+    // ---------------------------------------------------------------
+    function drawGrid(vp) {
+      const screenSpacing = GRID_SPACING * camera.zoom;
+      if (screenSpacing < 6) return; // too dense to be useful -- skip entirely
+      const startX = Math.floor(vp.minX / GRID_SPACING) * GRID_SPACING;
+      const startY = Math.floor(vp.minY / GRID_SPACING) * GRID_SPACING;
+      ctx.fillStyle = 'rgba(0,0,0,0.09)';
+      const r = Math.max(1, 1.4 / camera.zoom);
+      for (let x = startX; x <= vp.maxX; x += GRID_SPACING) {
+        for (let y = startY; y <= vp.maxY; y += GRID_SPACING) {
+          ctx.beginPath();
+          ctx.arc(x, y, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+
+    function renderStroke(stroke) {
+      const pts = stroke.points;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = stroke.color;
+      ctx.fillStyle = stroke.color;
+      ctx.lineWidth = stroke.width;
+      if (pts.length === 1) {
+        ctx.beginPath();
+        ctx.arc(pts[0].x, pts[0].y, stroke.width / 2, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+      }
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i + 1].x) / 2;
+        const my = (pts[i].y + pts[i + 1].y) / 2;
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+      }
+      ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      ctx.stroke();
+    }
+
+    function drawCursorPreview() {
+      if (!hoverPos) return;
+      const t = spaceHeld.value ? 'hand' : tool.value;
+      if (t === 'pencil') {
+        ctx.beginPath();
+        ctx.arc(hoverPos.x, hoverPos.y, (strokeWidth.value * camera.zoom) / 2, 0, Math.PI * 2);
+        ctx.strokeStyle = color.value;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else if (t === 'eraser') {
+        ctx.beginPath();
+        ctx.arc(hoverPos.x, hoverPos.y, ERASE_RADIUS_SCREEN, 0, Math.PI * 2);
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+
+    function draw() {
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvasEl.value.width, canvasEl.value.height);
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.translate(canvasSize.w / 2, canvasSize.h / 2);
+      ctx.scale(camera.zoom, camera.zoom);
+      ctx.translate(-camera.x, -camera.y);
+
+      const vp = getViewportBounds();
+      drawGrid(vp);
+
+      // --- the actual culling: skip every stroke whose bbox misses the viewport ---
+      let rendered = 0;
+      for (let i = 0; i < strokes.length; i++) {
+        const s = strokes[i];
+        if (boundsIntersect(s, vp)) { renderStroke(s); rendered++; }
+      }
+      culledStats.rendered = rendered;
+      culledStats.total = strokes.length;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to screen space for the cursor ring
+      drawCursorPreview();
+    }
+
+    function loop() {
+      if (dirty) { draw(); dirty = false; }
+      rafId = requestAnimationFrame(loop);
+    }
+
+    function resize() {
+      const rect = canvasEl.value.getBoundingClientRect();
+      canvasSize.w = rect.width;
+      canvasSize.h = rect.height;
+      const dpr = window.devicePixelRatio || 1;
+      canvasEl.value.width = Math.round(rect.width * dpr);
+      canvasEl.value.height = Math.round(rect.height * dpr);
+      requestRedraw();
+    }
+
+    // ---------------------------------------------------------------
+    // Eraser hit-testing (object eraser: removes whole strokes)
+    // ---------------------------------------------------------------
+    function pointSegmentDistance(p, a, b) {
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return dist(p, a);
+      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+      t = clamp(t, 0, 1);
+      return dist(p, { x: a.x + t * dx, y: a.y + t * dy });
+    }
+    function strokeHit(stroke, pt, radius) {
+      const pad = radius + stroke.width / 2;
+      if (pt.x < stroke.minX - pad || pt.x > stroke.maxX + pad ||
+          pt.y < stroke.minY - pad || pt.y > stroke.maxY + pad) return false;
+      const pts = stroke.points;
+      if (pts.length === 1) return dist(pt, pts[0]) <= pad;
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (pointSegmentDistance(pt, pts[i], pts[i + 1]) <= pad) return true;
+      }
+      return false;
+    }
+    function eraseAt(sx, sy) {
+      const world = screenToWorld(sx, sy);
+      const r = ERASE_RADIUS_SCREEN / camera.zoom;
+      const vp = getViewportBounds();
+      for (let i = strokes.length - 1; i >= 0; i--) {
+        const s = strokes[i];
+        if (eraseState.erasedIds.has(s.id)) continue;
+        if (!boundsIntersect(s, vp)) continue; // only test what's actually visible
+        if (strokeHit(s, world, r)) {
+          eraseState.erasedIds.add(s.id);
+          eraseState.removedStrokes.push(s);
+          strokes.splice(i, 1);
+        }
+      }
+      requestRedraw();
+    }
+
+    // ---------------------------------------------------------------
+    // History (undo/redo) -- simple command pattern
+    // ---------------------------------------------------------------
+    function pushHistory(op) {
+      historyStack = historyStack.slice(0, historyIndex + 1);
+      historyStack.push(op);
+      historyIndex = historyStack.length - 1;
+      syncHistoryFlags();
+    }
+    function syncHistoryFlags() {
+      canUndo.value = historyIndex >= 0;
+      canRedo.value = historyIndex < historyStack.length - 1;
+    }
+    function undo() {
+      if (historyIndex < 0) return;
+      const op = historyStack[historyIndex];
+      if (op.type === 'add') {
+        const idx = strokes.findIndex((s) => s.id === op.stroke.id);
+        if (idx !== -1) strokes.splice(idx, 1);
+      } else if (op.type === 'erase') {
+        strokes.push(...op.strokes);
+      }
+      historyIndex--;
+      syncHistoryFlags();
+      requestRedraw();
+    }
+    function redo() {
+      if (historyIndex >= historyStack.length - 1) return;
+      historyIndex++;
+      const op = historyStack[historyIndex];
+      if (op.type === 'add') {
+        strokes.push(op.stroke);
+      } else if (op.type === 'erase') {
+        for (const s of op.strokes) {
+          const idx = strokes.findIndex((x) => x.id === s.id);
+          if (idx !== -1) strokes.splice(idx, 1);
+        }
+      }
+      syncHistoryFlags();
+      requestRedraw();
+    }
+
+    function finalizeStroke() {
+      if (drawState) {
+        pushHistory({ type: 'add', stroke: drawState });
+        drawState = null;
+        requestRedraw();
+      }
+    }
+    function finalizeErase() {
+      if (eraseState) {
+        if (eraseState.erasedIds.size > 0) {
+          pushHistory({ type: 'erase', strokes: eraseState.removedStrokes });
+        }
+        eraseState = null;
+      }
+    }
+
+    // ---------------------------------------------------------------
+    // Pointer / gesture handling
+    //   1 pointer + pencil  -> draw
+    //   1 pointer + hand    -> pan
+    //   1 pointer + eraser  -> erase
+    //   2 pointers (touch)  -> combined pinch-zoom + pan
+    //   wheel, no ctrl      -> pan (mouse wheel AND trackpad two-finger scroll)
+    //   wheel + ctrl/meta   -> zoom to cursor (trackpad pinch is reported this way)
+    // ---------------------------------------------------------------
+    function effectiveTool() { return spaceHeld.value ? 'hand' : tool.value; }
+
+    function onPointerDown(e) {
+      canvasEl.value.setPointerCapture(e.pointerId);
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      isPointerDown.value = true;
+
+      if (activePointers.size === 1) {
+        const pos = { x: e.clientX, y: e.clientY };
+        hoverPos = pos;
+        const t = effectiveTool();
+        if (t === 'hand' || e.button === 1) {
+          panState = { lastX: pos.x, lastY: pos.y };
+        } else if (t === 'pencil' && e.button === 0) {
+          const world = screenToWorld(pos.x, pos.y);
+          drawState = {
+            id: ++strokeSeq, points: [world], color: color.value, width: strokeWidth.value,
+            minX: world.x, maxX: world.x, minY: world.y, maxY: world.y,
+          };
+          strokes.push(drawState);
+        } else if (t === 'eraser' && e.button === 0) {
+          eraseState = { erasedIds: new Set(), removedStrokes: [] };
+          eraseAt(pos.x, pos.y);
+        }
+        requestRedraw();
+      } else if (activePointers.size === 2) {
+        // a second finger just landed: abandon any single-pointer action
+        finalizeStroke();
+        finalizeErase();
+        panState = null;
+        const pts = [...activePointers.values()];
+        pinchState = { lastDist: dist(pts[0], pts[1]), lastMid: midpoint(pts[0], pts[1]) };
+      }
+    }
+
+    function onPointerMove(e) {
+      if (!activePointers.has(e.pointerId)) {
+        hoverPos = { x: e.clientX, y: e.clientY };
+        if (tool.value === 'pencil' || tool.value === 'eraser') requestRedraw();
+        return;
+      }
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pos = { x: e.clientX, y: e.clientY };
+      hoverPos = pos;
+
+      if (activePointers.size >= 2 && pinchState) {
+        const pts = [...activePointers.values()].slice(0, 2);
+        const curDist = dist(pts[0], pts[1]);
+        const curMid = midpoint(pts[0], pts[1]);
+        // anchor: the world point that was under the OLD midpoint stays under
+        // the NEW midpoint -- this gives combined pan + zoom-to-pinch-centre.
+        const worldAtLastMid = screenToWorld(pinchState.lastMid.x, pinchState.lastMid.y);
+        const newZoom = clamp(camera.zoom * (curDist / pinchState.lastDist), MIN_ZOOM, MAX_ZOOM);
+        camera.zoom = newZoom;
+        camera.x = worldAtLastMid.x - (curMid.x - canvasSize.w / 2) / newZoom;
+        camera.y = worldAtLastMid.y - (curMid.y - canvasSize.h / 2) / newZoom;
+        zoomDisplay.value = Math.round(newZoom * 100);
+        pinchState.lastDist = curDist;
+        pinchState.lastMid = curMid;
+        requestRedraw();
+        return;
+      }
+
+      if (panState) {
+        moveCamera(-(pos.x - panState.lastX), -(pos.y - panState.lastY));
+        panState.lastX = pos.x; panState.lastY = pos.y;
+      } else if (drawState) {
+        const world = screenToWorld(pos.x, pos.y);
+        drawState.points.push(world);
+        drawState.minX = Math.min(drawState.minX, world.x);
+        drawState.maxX = Math.max(drawState.maxX, world.x);
+        drawState.minY = Math.min(drawState.minY, world.y);
+        drawState.maxY = Math.max(drawState.maxY, world.y);
+        requestRedraw();
+      } else if (eraseState) {
+        eraseAt(pos.x, pos.y);
+      }
+    }
+
+    function onPointerUp(e) {
+      activePointers.delete(e.pointerId);
+      isPointerDown.value = activePointers.size > 0;
+
+      if (activePointers.size < 2) pinchState = null;
+
+      if (activePointers.size === 1 && !panState && !drawState && !eraseState) {
+        // a pinch just ended with one finger still down -- resume cleanly
+        const remaining = [...activePointers.values()][0];
+        if (effectiveTool() === 'hand') panState = { lastX: remaining.x, lastY: remaining.y };
+      }
+      if (activePointers.size === 0) {
+        finalizeStroke();
+        finalizeErase();
+        panState = null;
+      }
+    }
+
+    function onPointerLeave(e) {
+      if (!activePointers.has(e.pointerId)) {
+        hoverPos = null;
+        requestRedraw();
+      }
+    }
+
+    function onWheel(e) {
+      const rect = canvasEl.value.getBoundingClientRect();
+      const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+      if (e.ctrlKey || e.metaKey) {
+        // trackpad pinch is delivered as a wheel event with ctrlKey set;
+        // this also covers Ctrl/Cmd + mouse-wheel as a deliberate zoom.
+        const factor = Math.exp(-e.deltaY * 0.01);
+        zoomAt(sx, sy, camera.zoom * factor);
+      } else {
+        // plain mouse wheel AND trackpad two-finger scroll both land here --
+        // this is the "two-finger gesture auto-enables panning" behaviour.
+        moveCamera(e.deltaX, e.deltaY);
+      }
+    }
+
+    function resetTransientStates() {
+      activePointers.clear();
+      panState = null; pinchState = null;
+      finalizeStroke(); finalizeErase();
+      isPointerDown.value = false;
+      requestRedraw();
+    }
+
+    function onKeyDown(e) {
+      if (e.code === 'Space' && !spaceHeld.value) { spaceHeld.value = true; e.preventDefault(); }
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+      else if (!mod) {
+        if (e.key === 'p' || e.key === 'P') tool.value = 'pencil';
+        if (e.key === 'h' || e.key === 'H') tool.value = 'hand';
+        if (e.key === 'e' || e.key === 'E') tool.value = 'eraser';
+      }
+    }
+    function onKeyUp(e) { if (e.code === 'Space') spaceHeld.value = false; }
+
+    // ---------------------------------------------------------------
+    // Toolbar actions
+    // ---------------------------------------------------------------
+    function zoomInBtn() { zoomAt(canvasSize.w / 2, canvasSize.h / 2, camera.zoom * 1.25); }
+    function zoomOutBtn() { zoomAt(canvasSize.w / 2, canvasSize.h / 2, camera.zoom / 1.25); }
+    function resetView() {
+      camera.x = 0; camera.y = 0; camera.zoom = 1;
+      zoomDisplay.value = 100;
+      requestRedraw();
+    }
+
+    onMounted(() => {
+      ctx = canvasEl.value.getContext('2d');
+      resize();
+      window.addEventListener('resize', resize);
+      window.addEventListener('keydown', onKeyDown);
+      window.addEventListener('keyup', onKeyUp);
+      window.addEventListener('blur', resetTransientStates);
+      loop();
+    });
+    onBeforeUnmount(() => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', resize);
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', resetTransientStates);
+    });
+
+    return {
+      canvasEl, tool, color, strokeWidth, zoomDisplay, canUndo, canRedo,
+      culledStats, cursorStyle,
+      onPointerDown, onPointerMove, onPointerUp, onPointerLeave, onWheel,
+      undo, redo, zoomInBtn, zoomOutBtn, resetView,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>
