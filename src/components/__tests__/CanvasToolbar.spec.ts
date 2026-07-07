@@ -165,4 +165,19 @@ describe('CanvasToolbar', () => {
     expect(rangeInput.element.getAttribute('min')).toBe('1')
     expect(rangeInput.element.getAttribute('max')).toBe('40')
   })
+
+  it('highlights sticky-note when tool="sticky-note"', () => {
+    const wrapper = mount(CanvasToolbar, { props: { ...defaultProps, tool: 'sticky-note' } })
+    expect(wrapper.findAll('button.active')).toHaveLength(1)
+  })
+
+  it('emits update:tool with sticky-note when sticky button clicked', async () => {
+    const wrapper = mount(CanvasToolbar, { props: defaultProps })
+    const stickyButton = wrapper.findAll('button').find(
+      (b) => b.attributes('title') === 'Sticky Note (S)',
+    )
+    await stickyButton?.trigger('click')
+    expect(wrapper.emitted('update:tool')).toBeTruthy()
+    expect(wrapper.emitted('update:tool')![0]).toEqual(['sticky-note'])
+  })
 })
